@@ -20,10 +20,10 @@ import {
   Layers,
   Sparkles,
   Download,
+  MapPinned,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -33,13 +33,12 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import DrawingUploader from "@/components/DrawingUploader";
-import DrawingCard from "@/components/DrawingCard";
 import RoomTable from "@/components/RoomTable";
 import RoomWiseView from "@/components/RoomWiseView";
 import FloorSidebar from "@/components/FloorSidebar";
 import DrawingViewer from "@/components/DrawingViewer";
 import AIRecommendationsPanel from "@/components/AIRecommendationsPanel";
-import DetectionSummary from "@/components/DetectionSummary";
+import FloorSchedulePanel from "@/components/FloorSchedulePanel";
 import { useFloors } from "@/hooks/useFloors";
 import { useRecommendations } from "@/hooks/useRecommendations";
 import {
@@ -62,7 +61,12 @@ export default function ProjectDetail() {
   /** null = the combined whole-project view. */
   const [projectView, setProjectView] = useState(false);
   const [highlightedRoomId, setHighlightedRoomId] = useState<string | null>(null);
-  const [insightsOpen, setInsightsOpen] = useState(true);
+  // Closed by default so the drawing gets the room; the header toggle opens it.
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  /** Room whose schedule card is expanded (opened from the drawing or the card). */
+  const [openedRoomId, setOpenedRoomId] = useState<string | null>(null);
+  const toggleOpenedRoom = (roomId: string) =>
+    setOpenedRoomId((current) => (current === roomId ? null : roomId));
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   /** Room-wise cards (default, cleaner) vs the full Excel-style table. */
   const [scheduleView, setScheduleView] = useState<"cards" | "table">("cards");
@@ -203,12 +207,14 @@ export default function ProjectDetail() {
     setProjectView(false);
     setActiveFloorId(floorId);
     setHighlightedRoomId(null);
+    setOpenedRoomId(null);
     setMobileSidebarOpen(false);
   };
 
   const handleShowProjectView = () => {
     setProjectView(true);
     setHighlightedRoomId(null);
+    setOpenedRoomId(null);
     setMobileSidebarOpen(false);
   };
 
@@ -428,6 +434,16 @@ export default function ProjectDetail() {
               )}
             </Button>
 
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => navigate(`/project/${id}/legend-mapping`)}
+            >
+              <MapPinned className="h-3.5 w-3.5 text-primary" />
+              <span className="hidden sm:inline">Legend Mapping</span>
+            </Button>
+
             <div className="mx-0.5 hidden h-6 w-px bg-border sm:block" />
 
             {exportMenu}
@@ -472,8 +488,10 @@ export default function ProjectDetail() {
         </Sheet>
 
         {/* Main workspace */}
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="space-y-5 p-4 sm:p-5">
+        <main
+          className={`min-w-0 flex-1 ${projectView ? "overflow-y-auto" : "overflow-y-auto lg:overflow-hidden"}`}
+        >
+          <div className={projectView ? "space-y-5 p-4 sm:p-5" : "h-full"}>
             {projectView ? (
               /* ---------------- Combined project view ---------------- */
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
@@ -534,104 +552,49 @@ export default function ProjectDetail() {
                 )}
               </motion.div>
             ) : (
-              /* ---------------- Single floor workspace ---------------- */
-              <>
-                <DrawingUploader
-                  projectId={id!}
-                  floorId={activeFloorId}
-                  floorName={activeFloor?.name ?? ""}
-                />
+              /* ---------------- Single floor workspace ----------------
+                 Drawing fills the left; the schedule cards sit on the right.
+                 Clicking a room on the drawing opens its card. */
+              <div className="flex h-full flex-col lg:flex-row">
+                <div className="flex min-w-0 flex-col gap-3 p-3 sm:p-4 lg:min-h-0 lg:flex-1">
+                  <DrawingUploader
+                    projectId={id!}
+                    floorId={activeFloorId}
+                    floorName={activeFloor?.name ?? ""}
+                  />
+                  <div className="h-[75vh] min-h-[460px] lg:h-auto lg:min-h-0 lg:flex-1">
+                    <DrawingViewer
+                      drawing={activeDrawing}
+                      rooms={viewerRooms}
+                      highlightedRoomId={highlightedRoomId ?? openedRoomId}
+                      onHighlightRoom={setHighlightedRoomId}
+                      onRoomClick={toggleOpenedRoom}
+                      floorName={activeFloor?.name}
+                    />
+                  </div>
+                </div>
 
-                <DrawingViewer
-                  drawing={activeDrawing}
-                  rooms={viewerRooms}
-                  highlightedRoomId={highlightedRoomId}
-                  onHighlightRoom={setHighlightedRoomId}
-                  floorName={activeFloor?.name}
-                />
-
-                <Tabs defaultValue="schedule">
-                  <TabsList>
-                    <TabsTrigger value="schedule" className="gap-1.5 text-xs">
-                      <Table2 className="h-3.5 w-3.5" />
-                      Schedule ({floorRooms.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="drawings" className="gap-1.5 text-xs">
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      Drawings ({floorDrawings.length})
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="schedule" className="mt-4 space-y-4">
-                    {floorRooms.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-border bg-muted/20 p-10 text-center">
-                        <ClipboardList className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-                        <p className="text-sm font-medium text-foreground">
-                          No rooms on {activeFloor?.name ?? "this floor"} yet
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Upload a drawing above and the AI will extract every labelled space.
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-muted-foreground">
-                            {scheduleView === "cards"
-                              ? "Click any room to see its full finish details."
-                              : "Full Schedule of Finishes — editable, matches the Excel export."}
-                          </p>
-                          {viewToggle}
-                        </div>
-                        {scheduleView === "cards" ? (
-                          <RoomWiseView
-                            rooms={floorRooms}
-                            projectId={id!}
-                            highlightedRoomId={highlightedRoomId}
-                            onHighlightRoom={setHighlightedRoomId}
-                          />
-                        ) : (
-                          <RoomTable
-                            rooms={floorRooms}
-                            projectId={id!}
-                            highlightedRoomId={highlightedRoomId}
-                            onHighlightRoom={setHighlightedRoomId}
-                          />
-                        )}
-                      </>
-                    )}
-                    <DetectionSummary drawings={floorDrawings} rooms={floorRooms} />
-                  </TabsContent>
-
-                  <TabsContent value="drawings" className="mt-4">
-                    {drawingsLoading ? (
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {[1, 2].map((i) => (
-                          <div key={i} className="h-40 animate-pulse rounded-xl bg-muted" />
-                        ))}
-                      </div>
-                    ) : floorDrawings.length === 0 ? (
-                      <p className="py-8 text-center text-sm text-muted-foreground">
-                        No drawings on this floor yet.
-                      </p>
-                    ) : (
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {floorDrawings.map((drawing) => (
-                          <DrawingCard
-                            key={drawing.id}
-                            drawing={drawing}
-                            onDelete={() => deleteDrawing.mutate(drawing.id)}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </>
+                <aside
+                  aria-label="Schedule of Finishes"
+                  className="flex min-h-[480px] flex-col border-t border-border bg-card lg:min-h-0 lg:w-[380px] lg:shrink-0 lg:border-l lg:border-t-0"
+                >
+                  <FloorSchedulePanel
+                    projectId={id!}
+                    floorName={activeFloor?.name ?? ""}
+                    rooms={floorRooms}
+                    drawings={floorDrawings}
+                    drawingsLoading={drawingsLoading}
+                    highlightedRoomId={highlightedRoomId ?? openedRoomId}
+                    onHighlightRoom={setHighlightedRoomId}
+                    openedRoomId={openedRoomId}
+                    onToggleRoom={toggleOpenedRoom}
+                    onDeleteDrawing={(drawingId) => deleteDrawing.mutate(drawingId)}
+                  />
+                </aside>
+              </div>
             )}
           </div>
         </main>
-
         {/* AI insights panel (desktop) */}
         {insightsOpen && (
           <div className="hidden w-80 shrink-0 xl:block">{insightsPanel}</div>

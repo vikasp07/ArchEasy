@@ -11,6 +11,9 @@
     },
     "api/recommend-materials.ts": {
       "maxDuration": 60
+    },
+    "api/analyze-legend.ts": {
+      "maxDuration": 60
     }
   }
 }

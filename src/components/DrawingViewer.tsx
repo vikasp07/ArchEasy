@@ -40,6 +40,18 @@ interface Props {
   onHighlightRoom: (id: string | null) => void;
   /** Active floor name, stored on rooms the user adds by hand. */
   floorName?: string;
+  /**
+   * View-only: hides the edit tools. For drawings whose rooms are not saved
+   * rows (e.g. the Legend Mapping page), where editing has nothing to save to.
+   */
+  readOnly?: boolean;
+  /** Overrides the default colour-by-room-type for each overlay box. */
+  roomColor?: (room: Room) => string;
+  /**
+   * Called when a room box is clicked (outside edit mode). When provided it
+   * replaces the default click behaviour of toggling the highlight.
+   */
+  onRoomClick?: (id: string) => void;
 }
 
 const MIN_ZOOM = 0.25;
@@ -84,6 +96,9 @@ export default function DrawingViewer({
   highlightedRoomId,
   onHighlightRoom,
   floorName,
+  readOnly = false,
+  roomColor,
+  onRoomClick,
 }: Props) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -125,7 +140,7 @@ export default function DrawingViewer({
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const panStart = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
-  const [containerWidth, setContainerWidth] = useState(900);
+  const [containerSize, setContainerSize] = useState({ width: 900, height: 600 });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const isPdf = (drawing?.file_name ?? "").toLowerCase().endsWith(".pdf");
@@ -191,16 +206,38 @@ export default function DrawingViewer({
     setBoxHistory([]);
   }, [drawing?.id, resetView]);
 
-  // Track the canvas container width so PDFs render fit-to-width.
+  // Track the canvas container size so the whole sheet fits it at 100% zoom.
+  // Re-attaches when a drawing first appears (the container isn't mounted before).
+  const hasDrawing = !!drawing;
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const update = () => setContainerWidth(el.clientWidth || 900);
+    const update = () =>
+      setContainerSize((prev) => {
+        const width = el.clientWidth || 900;
+        const height = el.clientHeight || 600;
+        return prev.width === width && prev.height === height ? prev : { width, height };
+      });
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [hasDrawing]);
+
+  /** Space inside the canvas for the sheet, leaving a small margin. */
+  const fitWidth = Math.max(240, containerSize.width - 24);
+  const fitHeight = Math.max(240, containerSize.height - 24);
+
+  /**
+   * PDF render width that fits the whole page (width AND height). Uses the
+   * page's aspect from the last render; the first render fits width only,
+   * then settles at the fitted size.
+   */
+  const pdfRenderWidth = (() => {
+    const aspect = pdfInfo && pdfInfo.height > 0 ? pdfInfo.width / pdfInfo.height : null;
+    const width = aspect ? Math.min(fitWidth, fitHeight * aspect) : fitWidth;
+    return Math.round(Math.max(320, Math.min(width, 2400)));
+  })();
 
   const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
@@ -261,7 +298,7 @@ export default function DrawingViewer({
 
   // Editing needs the analysed sheet on screen, but not existing boxes: a drawing
   // where the AI placed nothing can still have boxes added by hand.
-  const editing = editMode && onAnalysedSheet;
+  const editing = !readOnly && editMode && onAnalysedSheet;
   const drawingBox = editing && drawMode && !freeformMode && !pendingBox;
   const drawingFreeform = editing && freeformMode && !pendingBox;
 
@@ -271,8 +308,11 @@ export default function DrawingViewer({
   );
 
   const handleRoomClick = useCallback(
-    (id: string) => onHighlightRoom(highlightedRoomId === id ? null : id),
-    [highlightedRoomId, onHighlightRoom]
+    (id: string) => {
+      if (onRoomClick) onRoomClick(id);
+      else onHighlightRoom(highlightedRoomId === id ? null : id);
+    },
+    [highlightedRoomId, onHighlightRoom, onRoomClick]
   );
 
   /** Rooms of this drawing with no box: a newly drawn box can be attached to one of them. */
@@ -481,7 +521,7 @@ export default function DrawingViewer({
           key={room.id}
           room={room}
           box={box}
-          color={roomTypeColor(room.room_type)}
+          color={roomColor ? roomColor(room) : roomTypeColor(room.room_type)}
           zoom={zoom}
           isHot={highlightedRoomId === room.id}
           isSelected={editing && selectedRoomId === room.id}
@@ -648,6 +688,7 @@ export default function DrawingViewer({
             <TooltipContent>{showLabels ? "Hide" : "Show"} room labels</TooltipContent>
           </Tooltip>
 
+          {!readOnly && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -672,6 +713,7 @@ export default function DrawingViewer({
               {editing ? "Done editing" : "Edit boxes: add, resize, move or rename rooms"}
             </TooltipContent>
           </Tooltip>
+          )}
 
           {editing && (
             <>
@@ -891,15 +933,15 @@ export default function DrawingViewer({
                 <PdfCanvas
                   url={signedUrl}
                   page={pdfPage}
-                  renderWidth={Math.max(320, Math.min(containerWidth - 32, 1400))}
+                  renderWidth={pdfRenderWidth}
                   onRendered={handleRendered}
                 />
               ) : (
                 <img
                   src={signedUrl}
                   alt={`Architectural drawing: ${drawing.file_name}`}
-                  className="block max-h-none max-w-none select-none"
-                  style={{ maxWidth: "min(72vw, 900px)" }}
+                  className="block select-none"
+                  style={{ maxWidth: fitWidth, maxHeight: fitHeight, width: "auto", height: "auto" }}
                   draggable={false}
                 />
               )}

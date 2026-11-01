@@ -10,6 +10,7 @@ import AuthPage from "@/pages/AuthPage";
 import Dashboard from "@/pages/Dashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
 import AIRecommendations from "@/pages/AIRecommendations";
+import LegendMapping from "@/pages/LegendMapping";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -27,6 +28,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/project/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
             <Route path="/project/:id/recommendations" element={<ProtectedRoute><AIRecommendations /></ProtectedRoute>} />
+            <Route path="/project/:id/legend-mapping" element={<ProtectedRoute><LegendMapping /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
